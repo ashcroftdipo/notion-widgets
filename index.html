@@ -21,6 +21,7 @@ body.flat .w{background:transparent;border:none}
 .time{font-size:min(23vw,30vh,84px);font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ampm{font-size:.3em;margin-left:.15em;color:var(--muted);font-weight:500;letter-spacing:0}
 .day{font-size:clamp(12px,7vw,17px);font-weight:600;margin-top:12px}
+.analog svg{width:min(78vw,56vh,240px);height:auto;display:block}
 .sub{color:var(--muted);font-size:clamp(11px,6vw,14px);margin-top:4px;line-height:1.35}
 .wx{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 10px}
 .icon svg{width:min(28vw,24vh,76px);height:auto;display:block}
@@ -131,19 +132,49 @@ function renderWidgets(){
   const mk = html => { const d = document.createElement('div'); d.className = 'w'; d.innerHTML = html; wrap.appendChild(d); return d; };
 
   let clockEl, progEl, wxEl;
-  if (show('clock')) clockEl = mk('<div class="time" id="t"></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
+  const analog = get('clock','digital') === 'analog';
+  let hHand, mHand, sHand;
+  if (show('clock')){
+    if (analog){
+      let ticks = '';
+      for (let i = 0; i < 60; i++){
+        const major = i % 5 === 0;
+        ticks += '<line x1="100" y1="' + (major ? 12 : 13) + '" x2="100" y2="' + (major ? 24 : 18) + '" stroke="' + (major ? 'var(--fg)' : 'var(--muted)') +
+          '" stroke-width="' + (major ? 3 : 1.2) + '" stroke-linecap="round" opacity="' + (major ? 0.9 : 0.5) + '" transform="rotate(' + (i*6) + ' 100 100)"/>';
+      }
+      const nums = [[12,100,42],[3,160,106],[6,100,170],[9,40,106]].map(([n,x,y]) =>
+        '<text x="' + x + '" y="' + y + '" text-anchor="middle" font-size="17" font-weight="600" fill="var(--fg)" font-family="Inter,system-ui,sans-serif">' + n + '</text>').join('');
+      clockEl = mk('<div class="analog"><svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="Analog clock">' +
+        '<circle cx="100" cy="100" r="95" fill="var(--bg)" stroke="var(--line)" stroke-width="2"/>' + ticks + nums +
+        '<line id="hh" x1="100" y1="108" x2="100" y2="56" stroke="var(--fg)" stroke-width="7" stroke-linecap="round"/>' +
+        '<line id="mh" x1="100" y1="112" x2="100" y2="32" stroke="var(--fg)" stroke-width="4.5" stroke-linecap="round"/>' +
+        '<line id="sh" x1="100" y1="122" x2="100" y2="26" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"' + (cfg.sec ? '' : ' display="none"') + '/>' +
+        '<circle cx="100" cy="100" r="6" fill="var(--accent)"/><circle cx="100" cy="100" r="2.2" fill="var(--bg)"/>' +
+        '</svg></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
+      hHand = clockEl.querySelector('#hh'); mHand = clockEl.querySelector('#mh'); sHand = clockEl.querySelector('#sh');
+    } else {
+      clockEl = mk('<div class="time" id="t"></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
+    }
+  }
   if (show('weather')) wxEl = mk('<div class="sub">Loading weather…</div>');
   if (show('progress')) progEl = mk('<div class="bars" id="bars"></div>');
 
   function tick(){
     const now = new Date();
-    if (clockEl){
+    if (clockEl && analog){
+      const z = zoned(now, cfg.tz);
+      hHand.setAttribute('transform', 'rotate(' + ((z.h % 12 + z.mi / 60) * 30) + ' 100 100)');
+      mHand.setAttribute('transform', 'rotate(' + ((z.mi + z.s / 60) * 6) + ' 100 100)');
+      sHand.setAttribute('transform', 'rotate(' + (z.s * 6) + ' 100 100)');
+    } else if (clockEl){
       const opt = {timeZone:cfg.tz, hour:'numeric', minute:'2-digit', hour12:cfg.h12};
       if (cfg.sec) opt.second = '2-digit';
       const parts = new Intl.DateTimeFormat('en-US',opt).formatToParts(now);
       const ampm = (parts.find(p => p.type === 'dayPeriod') || {}).value || '';
       const main = parts.filter(p => p.type !== 'dayPeriod').map(p => p.value).join('').trim();
       clockEl.querySelector('#t').innerHTML = main + (ampm ? '<span class="ampm">' + ampm + '</span>' : '');
+    }
+    if (clockEl){
       clockEl.querySelector('#wd').textContent = new Intl.DateTimeFormat('en-US',{timeZone:cfg.tz,weekday:'long'}).format(now);
       clockEl.querySelector('#dt').textContent = new Intl.DateTimeFormat('en-US',{timeZone:cfg.tz,month:'long',day:'numeric',year:'numeric'}).format(now);
     }
@@ -201,6 +232,9 @@ function renderSetup(){
       <label>Widget
         <select id="w"><option value="clock">Clock</option><option value="weather">Weather</option><option value="progress">Progress bars</option><option value="all">All three</option></select>
       </label>
+      <label>Clock style
+        <select id="clockstyle"><option value="digital">Digital</option><option value="analog">Analog</option></select>
+      </label>
       <label>City (weather)
         <div style="display:flex;gap:6px"><input id="city" placeholder="e.g. Katy" style="flex:1"><button class="ghost" id="find" type="button">Find</button></div>
         <div id="results"></div>
@@ -234,6 +268,7 @@ function renderSetup(){
   function build(){
     const q = new URLSearchParams();
     q.set('w', $('w').value);
+    if ($('clockstyle').value === 'analog') q.set('clock','analog');
     if ($('tz').value.trim() && validTz($('tz').value.trim())) q.set('tz', $('tz').value.trim());
     if (!$('h12').checked) q.set('h12','0');
     if ($('sec').checked) q.set('sec','1');
@@ -270,7 +305,7 @@ function renderSetup(){
     catch(e){ $('url').select(); document.execCommand('copy'); $('copy').textContent = 'Copied'; }
     setTimeout(() => $('copy').textContent = 'Copy link', 1500);
   };
-  ['w','tz','units','theme','accent','weekstart','h12','sec','card'].forEach(id => $(id).addEventListener('input', build));
+  ['w','clockstyle','tz','units','theme','accent','weekstart','h12','sec','card'].forEach(id => $(id).addEventListener('input', build));
   build();
 }
 
