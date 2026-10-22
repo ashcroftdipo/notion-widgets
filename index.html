@@ -19,6 +19,7 @@ body.setup{background:var(--page);height:auto;min-height:100%}
 .w{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:14px 12px;border-radius:14px;background:var(--card);border:1px solid var(--line);overflow:hidden}
 body.flat .w{background:transparent;border:none}
 .time{font-size:min(23vw,30vh,84px);font-weight:600;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.time.withsec{font-size:min(15.5vw,24vh,64px)}
 .ampm{font-size:.3em;margin-left:.15em;color:var(--muted);font-weight:500;letter-spacing:0}
 .day{font-size:clamp(12px,7vw,17px);font-weight:600;margin-top:12px}
 .analog svg{width:min(78vw,56vh,240px);height:auto;display:block}
@@ -153,7 +154,7 @@ function renderWidgets(){
         '</svg></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
       hHand = clockEl.querySelector('#hh'); mHand = clockEl.querySelector('#mh'); sHand = clockEl.querySelector('#sh');
     } else {
-      clockEl = mk('<div class="time" id="t"></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
+      clockEl = mk('<div class="time' + (cfg.sec ? ' withsec' : '') + '" id="t"></div><div class="day" id="wd"></div><div class="sub" id="dt"></div>');
     }
   }
   if (show('weather')) wxEl = mk('<div class="sub">Loading weather…</div>');
