@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notion Widgets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--fg:#37352f;--muted:#787774;--track:rgba(55,53,47,.12);--accent:#9065b0;--card:#ffffff;--line:rgba(55,53,47,.16);--page:#ffffff}
+:root[data-theme=dark]{--fg:#e6e6e4;--muted:#9b9a97;--track:rgba(255,255,255,.12);--card:#252525;--line:rgba(255,255,255,.14);--page:#191919}
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]){--fg:#e6e6e4;--muted:#9b9a97;--track:rgba(255,255,255,.12);--card:#252525;--line:rgba(255,255,255,.14);--page:#191919}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:transparent;color:var(--fg);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+body.widget{display:flex;align-items:center;justify-content:center;min-height:100vh}
+body.setup{background:var(--page)}
+.wrap{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;width:100%;padding:12px}
+.w{flex:1 1 220px;max-width:380px;min-height:140px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:16px;border-radius:12px}
+body.card .w{background:var(--card);border:1px solid var(--line)}
+.time{font-size:clamp(38px,11vw,60px);font-weight:300;letter-spacing:-1.5px;line-height:1;font-variant-numeric:tabular-nums}
+.ampm{font-size:.32em;margin-left:6px;color:var(--muted);letter-spacing:0;font-weight:500}
+.sub{color:var(--muted);font-size:14px;margin-top:8px}
+.wx{display:flex;align-items:center;gap:12px}
+.icon{font-size:42px;line-height:1}
+.temp{font-size:clamp(36px,10vw,52px);font-weight:300;letter-spacing:-1px;line-height:1}
+.hl{font-size:13px;color:var(--muted);margin-top:4px}
+.bars{width:100%;max-width:340px}
+.row{display:grid;grid-template-columns:56px 1fr 40px;align-items:center;gap:10px;font-size:13px;margin:6px 0}
+.row span:first-child{text-align:left;color:var(--muted)}
+.row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.track{height:8px;background:var(--track);border-radius:4px;overflow:hidden}
+.fill{height:100%;background:var(--accent);border-radius:4px;transition:width .6s ease}
+/* setup page */
+.cfg{max-width:860px;margin:0 auto;padding:24px 16px 48px}
+.cfg h1{font-size:22px;font-weight:600;margin:0 0 4px}
+.cfg p{color:var(--muted);margin:0 0 20px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500}
+input,select,button{font:inherit;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+input[type=color]{padding:2px;height:38px}
+.inline{flex-direction:row;align-items:center;gap:8px;font-weight:400}
+button{cursor:pointer;background:var(--accent);color:#fff;border:none;font-weight:500}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.out{display:flex;gap:8px;margin-top:20px}
+.out input{flex:1;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.preview{margin-top:20px;border:1px dashed var(--line);border-radius:12px;height:260px;width:100%}
+#results{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+#results button{text-align:left;background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:400;font-size:13px}
+.err{color:#d44c47;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+const P = new URLSearchParams(location.search);
+const get = (k, d) => (P.has(k) ? P.get(k) : d);
+const app = document.getElementById('app');
+
+/* ---------- shared helpers ---------- */
+function applyLook(params){
+  const t = params.theme || 'auto';
+  if (t !== 'auto') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  if (params.accent) document.documentElement.style.setProperty('--accent', '#' + params.accent.replace('#',''));
+}
+function zoned(date, tz){
+  const f = new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const o = {}; f.formatToParts(date).forEach(p => o[p.type] = p.value);
+  return {y:+o.year, m:+o.month, d:+o.day, h:+o.hour % 24, mi:+o.minute, s:+o.second};
+}
+function validTz(tz){ try { new Intl.DateTimeFormat('en-US',{timeZone:tz}); return true; } catch(e){ return false; } }
+
+const WX = {0:['Clear','☀️','🌙'],1:['Mostly clear','🌤️','🌙'],2:['Partly cloudy','⛅','☁️'],3:['Overcast','☁️','☁️'],
+  45:['Fog','🌫️'],48:['Fog','🌫️'],51:['Light drizzle','🌦️'],53:['Drizzle','🌦️'],55:['Heavy drizzle','🌧️'],
+  56:['Freezing drizzle','🌧️'],57:['Freezing drizzle','🌧️'],61:['Light rain','🌦️'],63:['Rain','🌧️'],65:['Heavy rain','🌧️'],
+  66:['Freezing rain','🌧️'],67:['Freezing rain','🌧️'],71:['Light snow','🌨️'],73:['Snow','❄️'],75:['Heavy snow','❄️'],77:['Snow grains','🌨️'],
+  80:['Showers','🌦️'],81:['Showers','🌧️'],82:['Heavy showers','⛈️'],85:['Snow showers','🌨️'],86:['Snow showers','🌨️'],
+  95:['Thunderstorm','⛈️'],96:['Storm with hail','⛈️'],99:['Storm with hail','⛈️']};
+
+async function geocode(name, country){
+  let url = 'https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name=' + encodeURIComponent(name);
+  if (country) url += '&countryCode=' + encodeURIComponent(country);
+  const r = await fetch(url); const j = await r.json();
+  return (j.results || []).map(x => ({name:x.name, admin:x.admin1 || '', country:x.country_code || '', lat:+x.latitude.toFixed(4), lon:+x.longitude.toFixed(4), tz:x.timezone}));
+}
+
+/* ---------- widget mode ---------- */
+function renderWidgets(){
+  document.body.classList.add('widget');
+  const cfg = {
+    w: get('w','all').split(',').map(s => s.trim()),
+    tz: get('tz', Intl.DateTimeFormat().resolvedOptions().timeZone),
+    h12: get('h12','1') !== '0',
+    sec: get('sec','0') === '1',
+    units: get('units','f') === 'c' ? 'c' : 'f',
+    lat: get('lat'), lon: get('lon'), city: get('city',''), country: get('country',''),
+    weekstart: get('weekstart','mon'),
+    theme: get('theme','auto'), accent: get('accent','')
+  };
+  if (!validTz(cfg.tz)) cfg.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  applyLook(cfg);
+  if (get('card','0') === '1') document.body.classList.add('card');
+  const all = cfg.w.includes('all');
+  const show = k => all || cfg.w.includes(k);
+
+  const wrap = document.createElement('div'); wrap.className = 'wrap'; app.appendChild(wrap);
+  const mk = html => { const d = document.createElement('div'); d.className = 'w'; d.innerHTML = html; wrap.appendChild(d); return d; };
+
+  let clockEl, progEl, wxEl;
+  if (show('clock')) clockEl = mk('<div class="time" id="t"></div><div class="sub" id="dt"></div>');
+  if (show('weather')) wxEl = mk('<div class="sub">Loading weather…</div>');
+  if (show('progress')) progEl = mk('<div class="bars" id="bars"></div>');
+
+  function tick(){
+    const now = new Date();
+    if (clockEl){
+      const opt = {timeZone:cfg.tz, hour:'numeric', minute:'2-digit', hour12:cfg.h12};
+      if (cfg.sec) opt.second = '2-digit';
+      const parts = new Intl.DateTimeFormat('en-US',opt).formatToParts(now);
+      const ampm = (parts.find(p => p.type === 'dayPeriod') || {}).value || '';
+      const main = parts.filter(p => p.type !== 'dayPeriod').map(p => p.value).join('').trim();
+      clockEl.querySelector('#t').innerHTML = main + (ampm ? '<span class="ampm">' + ampm + '</span>' : '');
+      clockEl.querySelector('#dt').textContent = new Intl.DateTimeFormat('en-US',{timeZone:cfg.tz,weekday:'long',month:'long',day:'numeric',year:'numeric'}).format(now);
+    }
+    if (progEl){
+      const z = zoned(now, cfg.tz);
+      const dayFrac = (z.h*3600 + z.mi*60 + z.s) / 86400;
+      const dow = new Date(Date.UTC(z.y, z.m-1, z.d)).getUTCDay();
+      const idx = cfg.weekstart === 'sun' ? dow : (dow + 6) % 7;
+      const dim = new Date(Date.UTC(z.y, z.m, 0)).getUTCDate();
+      const doy = (Date.UTC(z.y, z.m-1, z.d) - Date.UTC(z.y, 0, 1)) / 864e5;
+      const yl = ((z.y % 4 === 0 && z.y % 100 !== 0) || z.y % 400 === 0) ? 366 : 365;
+      const rows = [['Day', dayFrac], ['Week', (idx + dayFrac) / 7], ['Month', (z.d - 1 + dayFrac) / dim], ['Year', (doy + dayFrac) / yl]];
+      progEl.querySelector('#bars').innerHTML = rows.map(([l, p]) =>
+        '<div class="row"><span>' + l + '</span><div class="track"><div class="fill" style="width:' + (p*100).toFixed(2) + '%"></div></div><span>' + Math.floor(p*100) + '%</span></div>').join('');
+    }
+  }
+  tick(); setInterval(tick, 1000);
+
+  async function loadWeather(){
+    try{
+      let lat = cfg.lat, lon = cfg.lon, label = cfg.city;
+      if ((!lat || !lon) && cfg.city){
+        const res = await geocode(cfg.city, cfg.country);
+        if (!res.length) throw new Error('City not found');
+        lat = res[0].lat; lon = res[0].lon; label = label || res[0].name;
+      }
+      if (!lat || !lon) throw new Error('Set a city in the settings page');
+      const u = cfg.units === 'c' ? 'celsius' : 'fahrenheit';
+      const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon +
+        '&current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m' +
+        '&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto&temperature_unit=' + u;
+      const j = await (await fetch(url)).json();
+      const c = j.current, d = j.daily;
+      const w = WX[c.weather_code] || ['—','🌡️'];
+      const icon = (!c.is_day && w[2]) ? w[2] : w[1];
+      const deg = '°' + cfg.units.toUpperCase();
+      wxEl.innerHTML = '<div class="wx"><div class="icon">' + icon + '</div><div class="temp">' + Math.round(c.temperature_2m) + '°</div></div>' +
+        '<div class="sub">' + w[0] + (label ? ' · ' + label : '') + '</div>' +
+        '<div class="hl">H ' + Math.round(d.temperature_2m_max[0]) + '° · L ' + Math.round(d.temperature_2m_min[0]) + '° · Feels ' + Math.round(c.apparent_temperature) + deg + ' · ' + c.relative_humidity_2m + '% RH</div>';
+    } catch(e){
+      wxEl.innerHTML = '<div class="sub">Weather unavailable</div><div class="hl">' + e.message + '</div>';
+    }
+  }
+  if (wxEl){ loadWeather(); setInterval(loadWeather, 15 * 60 * 1000); }
+}
+
+/* ---------- settings / builder mode ---------- */
+function renderSetup(){
+  document.body.classList.add('setup');
+  const tzGuess = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  app.innerHTML = `
+  <div class="cfg">
+    <h1>Widget settings</h1>
+    <p>Pick your options, copy the link, and paste it into Notion with /embed. To change a widget later, come back here, rebuild the link and swap it in. No account needed.</p>
+    <div class="grid">
+      <label>Widget
+        <select id="w"><option value="clock">Clock</option><option value="weather">Weather</option><option value="progress">Progress bars</option><option value="all">All three</option></select>
+      </label>
+      <label>City (weather)
+        <div style="display:flex;gap:6px"><input id="city" placeholder="e.g. Katy" style="flex:1"><button class="ghost" id="find" type="button">Find</button></div>
+        <div id="results"></div>
+      </label>
+      <label>Time zone <input id="tz" value="${tzGuess}"></label>
+      <label>Temperature
+        <select id="units"><option value="f">Fahrenheit</option><option value="c">Celsius</option></select>
+      </label>
+      <label>Theme
+        <select id="theme"><option value="auto">Match device</option><option value="light">Light</option><option value="dark">Dark</option></select>
+      </label>
+      <label>Accent color <input id="accent" type="color" value="#9065b0"></label>
+      <label>Week starts on
+        <select id="weekstart"><option value="mon">Monday</option><option value="sun">Sunday</option></select>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:8px;justify-content:flex-end">
+        <label class="inline"><input type="checkbox" id="h12" checked> 12-hour clock</label>
+        <label class="inline"><input type="checkbox" id="sec"> Show seconds</label>
+        <label class="inline"><input type="checkbox" id="card"> Card background</label>
+      </div>
+    </div>
+    <div id="cityinfo" class="hl" style="margin-top:10px;color:var(--muted)"></div>
+    <div class="out"><input id="url" readonly><button id="copy" type="button">Copy link</button></div>
+    <iframe class="preview" id="pv" title="Preview"></iframe>
+  </div>`;
+
+  const $ = id => document.getElementById(id);
+  let loc = null; // {name, lat, lon}
+  const base = location.origin + location.pathname;
+
+  function build(){
+    const q = new URLSearchParams();
+    q.set('w', $('w').value);
+    if ($('tz').value.trim() && validTz($('tz').value.trim())) q.set('tz', $('tz').value.trim());
+    if (!$('h12').checked) q.set('h12','0');
+    if ($('sec').checked) q.set('sec','1');
+    if ($('units').value === 'c') q.set('units','c');
+    if ($('theme').value !== 'auto') q.set('theme', $('theme').value);
+    q.set('accent', $('accent').value.replace('#',''));
+    if ($('weekstart').value === 'sun') q.set('weekstart','sun');
+    if ($('card').checked) q.set('card','1');
+    if (loc){ q.set('city', loc.name); q.set('lat', loc.lat); q.set('lon', loc.lon); }
+    const u = base + '?' + q.toString();
+    $('url').value = u;
+    $('pv').src = u;
+    applyLook({theme:$('theme').value});
+  }
+
+  $('find').onclick = async () => {
+    const name = $('city').value.trim(); if (!name) return;
+    $('results').innerHTML = '<span class="hl">Searching…</span>';
+    try{
+      const res = await geocode(name);
+      if (!res.length){ $('results').innerHTML = '<span class="err">No match. Try a nearby larger city.</span>'; return; }
+      $('results').innerHTML = '';
+      res.forEach(r => {
+        const b = document.createElement('button'); b.type = 'button';
+        b.textContent = r.name + (r.admin ? ', ' + r.admin : '') + ' (' + r.country + ')';
+        b.onclick = () => { loc = r; $('results').innerHTML = ''; $('cityinfo').textContent = 'Weather location: ' + b.textContent + ' · ' + r.lat + ', ' + r.lon;
+          if (r.tz && validTz(r.tz)) $('tz').value = r.tz; build(); };
+        $('results').appendChild(b);
+      });
+    } catch(e){ $('results').innerHTML = '<span class="err">Lookup failed: ' + e.message + '</span>'; }
+  };
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('url').value); $('copy').textContent = 'Copied'; }
+    catch(e){ $('url').select(); document.execCommand('copy'); $('copy').textContent = 'Copied'; }
+    setTimeout(() => $('copy').textContent = 'Copy link', 1500);
+  };
+  ['w','tz','units','theme','accent','weekstart','h12','sec','card'].forEach(id => $(id).addEventListener('input', build));
+  build();
+}
+
+if (P.has('w')) renderWidgets(); else renderSetup();
+})();
+</script>
+</body>
+</html>
